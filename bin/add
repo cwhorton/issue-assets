@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Add one or more files for a GitHub issue/PR, commit, push, print markdown.
+#
+#   bin/add <project> <number> <file> [<file>...]
+#
+# Files are copied to <project>/<number>/<basename>. Existing files are not
+# overwritten (append a suffix or pick a new name instead).
+set -euo pipefail
+
+usage() { echo "usage: $0 <project> <number> <file> [<file>...]" >&2; exit 2; }
+[ $# -ge 3 ] || usage
+
+project=$1; number=$2; shift 2
+[[ "$project" =~ ^[a-z0-9-]+$ ]] || { echo "project must be a lowercase slug" >&2; exit 2; }
+[[ "$number"  =~ ^[0-9]+$ ]]     || { echo "number must be an integer" >&2; exit 2; }
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+dest="$root/$project/$number"
+mkdir -p "$dest"
+
+added=()
+for f in "$@"; do
+  [ -f "$f" ] || { echo "not a file: $f" >&2; exit 1; }
+  base=$(basename "$f")
+  if [ -e "$dest/$base" ]; then
+    echo "refusing to overwrite existing $project/$number/$base" >&2; exit 1
+  fi
+  cp "$f" "$dest/$base"
+  added+=("$project/$number/$base")
+done
+
+cd "$root"
+git pull -q --ff-only
+git add -- "${added[@]}"
+git commit -q -m "$project#$number: add ${#added[@]} file(s)" -- "${added[@]}"
+git push -q
+
+remote=$(git remote get-url origin)
+slug=$(echo "$remote" | sed -E 's#^(git@github.com:|https://github.com/)##; s#\.git$##')
+branch=$(git rev-parse --abbrev-ref HEAD)
+echo
+for p in "${added[@]}"; do
+  name=$(basename "$p"); alt=${name%.*}; alt=${alt//-/ }
+  echo "![$alt](https://raw.githubusercontent.com/$slug/$branch/$p)"
+done
